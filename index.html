@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>課堂與個人待辦</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+  <!-- 引入 SortableJS 支援手機端流暢拖曳排序 -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+</head>
+<body>
+
+  <!-- 背景光暈裝飾（凸顯毛玻璃效果） -->
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+
+  <header id="app-header" class="glass-panel">
+    <div>
+      <h1>待辦清單</h1>
+      <span id="sync-status">連線中...</span>
+    </div>
+    <button id="notify-btn" class="glass-btn" title="開啟提醒通知">🔔 開啟通知</button>
+  </header>
+
+  <!-- 課堂標籤篩選列 -->
+  <nav id="filter-bar">
+    <button class="filter-chip active" data-tag="all">全部</button>
+    <button class="filter-chip" data-tag="外文文學">外文文學</button>
+    <button class="filter-chip" data-tag="設計空間">設計空間</button>
+    <button class="filter-chip" data-tag="程式理化">程式理化</button>
+    <button class="filter-chip" data-tag="個人雜項">個人雜項</button>
+  </nav>
+
+  <!-- 待辦清單容器 -->
+  <main id="todo-list-container">
+    <ul id="todo-list"></ul>
+  </main>
+
+  <!-- 底部懸浮輸入框 -->
+  <footer id="floating-input-wrapper" class="glass-panel">
+    <form id="todo-form">
+      <div class="input-top-row">
+        <input type="text" id="todo-input" placeholder="新增課堂作業或待辦..." required autocomplete="off">
+        <button type="submit" id="add-btn">＋</button>
+      </div>
+      <div class="input-meta-row">
+        <select id="tag-select" class="glass-select">
+          <option value="外文文學">📖 外文文學</option>
+          <option value="設計空間">🏛️ 設計空間</option>
+          <option value="程式理化">💻 程式理化</option>
+          <option value="個人雜項">📌 個人雜項</option>
+        </select>
+        <input type="datetime-local" id="due-date-input" class="glass-select">
+      </div>
+    </form>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
