@@ -1,24 +1,23 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { 
-  initializeFirestore, persistentLocalCache,
-  collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
+  getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
   query, orderBy, onSnapshot, serverTimestamp 
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// 1. 填入你的 Firebase 設定
+// 1. 已修正 apiKey 拼字並填入你的 Firebase 設定
 const firebaseConfig = {
-  aapiKey: "AIzaSyDhYzayWMLzJdZGLwymhY3hfxCl6tw4qtE",
+  apiKey: "AIzaSyDhYzayWMLzJdZGLwymhY3hfxCl6tw4qtE",
   authDomain: "schedule-bc89e.firebaseapp.com",
   projectId: "schedule-bc89e",
   storageBucket: "schedule-bc89e.firebasestorage.app",
   messagingSenderId: "772996974911",
-  appId: "1:772996974911:web:a840bfa3f719c5683bab8a",
+  appId: "1:772996974911:web:a840bfa3f719c5683bab8a"
 };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = initializeFirestore(app, { localCache: persistentLocalCache() });
+const db = getFirestore(app);
 
 // DOM 元素
 const statusEl = document.getElementById('sync-status');
@@ -28,38 +27,114 @@ const tagSelect = document.getElementById('tag-select');
 const dueDateInput = document.getElementById('due-date-input');
 const todoListEl = document.getElementById('todo-list');
 const notifyBtn = document.getElementById('notify-btn');
+const bgBtn = document.getElementById('bg-btn');
+const bgFileInput = document.getElementById('bg-file-input');
+const customBgLayer = document.getElementById('custom-bg-layer');
 
 let currentUser = null;
 let allTodos = [];
 let currentFilter = 'all';
-let notifiedIds = new Set(); // 避免重複發送通知
+let notifiedIds = new Set();
 
-// 2. 匿名登入與資料監聽
-signInAnonymously(auth).catch(() => statusEl.textContent = "驗證失敗");
+// ==========================================
+// 自訂背景邏輯（支援相簿選圖、自動壓縮與重置）
+// ==========================================
+const savedBg = localStorage.getItem('pwa_custom_bg');
+if (savedBg && customBgLayer) {
+  customBgLayer.style.backgroundImage = `url(${savedBg})`;
+}
+
+if (bgBtn && bgFileInput) {
+  bgBtn.addEventListener('click', () => {
+    if (localStorage.getItem('pwa_custom_bg')) {
+      const reset = confirm("要「恢復預設漸層背景」請按確定；要「挑選新照片」請按取消。");
+      if (reset) {
+        localStorage.removeItem('pwa_custom_bg');
+        customBgLayer.style.backgroundImage = '';
+        return;
+      }
+    }
+    bgFileInput.click();
+  });
+
+  bgFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 1280;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height && width > maxDim) {
+          height *= maxDim / width;
+          width = maxDim;
+        } else if (height > maxDim) {
+          width *= maxDim / height;
+          height = maxDim;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.78);
+        try {
+          localStorage.setItem('pwa_custom_bg', compressedDataUrl);
+          customBgLayer.style.backgroundImage = `url(${compressedDataUrl})`;
+        } catch (err) {
+          alert("照片檔案過大無法儲存，請換一張較小的圖片。");
+        }
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  });
+}
+
+// ==========================================
+// Firebase 驗證與資料監聽
+// ==========================================
+statusEl.textContent = "正在驗證身分...";
+signInAnonymously(auth).catch((error) => {
+  statusEl.textContent = `驗證失敗: ${error.code}`;
+  console.error("Auth Error:", error);
+});
 
 onAuthStateChanged(auth, (user) => {
   if (user) {
     currentUser = user;
-    statusEl.textContent = "已同步";
+    statusEl.textContent = "連線資料庫中...";
     listenToTodos(user.uid);
   }
 });
 
 function listenToTodos(uid) {
   const todosRef = collection(db, "users", uid, "todos");
-  // 依照自訂拖曳順序 order 升冪排列
   const q = query(todosRef, orderBy("order", "asc"));
 
   onSnapshot(q, (snapshot) => {
+    statusEl.textContent = "已連線並即時同步";
     allTodos = [];
     snapshot.forEach((docSnap) => {
       allTodos.push({ id: docSnap.id, ...docSnap.data() });
     });
     renderList();
+  }, (error) => {
+    statusEl.textContent = `同步錯誤: ${error.code}`;
+    console.error("Firestore Error:", error);
   });
 }
 
-// 3. 渲染清單與篩選
+// ==========================================
+// 渲染清單與篩選
+// ==========================================
 function renderList() {
   todoListEl.innerHTML = '';
   const filtered = currentFilter === 'all' 
@@ -71,7 +146,6 @@ function renderList() {
   });
 }
 
-// 課堂標籤篩選事件
 document.querySelectorAll('.filter-chip').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
@@ -81,53 +155,60 @@ document.querySelectorAll('.filter-chip').forEach(btn => {
   });
 });
 
-// 4. 新增待辦
+// ==========================================
+// 新增待辦
+// ==========================================
 todoForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = todoInput.value.trim();
-  if (!text || !currentUser) return;
+  if (!text) return;
+  if (!currentUser) {
+    alert("尚未連線完成，請稍候再試");
+    return;
+  }
 
   const tag = tagSelect.value;
   const dueDate = dueDateInput.value || null;
   todoInput.value = '';
   dueDateInput.value = '';
 
-  // 新項目排在最上方 (取目前最小 order - 1000)
   const minOrder = allTodos.length > 0 ? Math.min(...allTodos.map(t => t.order || 0)) : 0;
 
-  await addDoc(collection(db, "users", currentUser.uid, "todos"), {
-    text,
-    tag,
-    dueDate,
-    completed: false,
-    order: minOrder - 1000,
-    createdAt: serverTimestamp()
-  });
+  try {
+    await addDoc(collection(db, "users", currentUser.uid, "todos"), {
+      text,
+      tag,
+      dueDate,
+      completed: false,
+      order: minOrder - 1000,
+      createdAt: serverTimestamp()
+    });
+  } catch (err) {
+    alert(`新增失敗：${err.message}`);
+  }
 });
 
-// 5. 建立單張卡片（包含左滑刪除手勢與行事曆匯出）
+// ==========================================
+// 建立單張卡片與左滑手勢
+// ==========================================
 function createTodoElement(todo) {
   const wrapper = document.createElement('li');
   wrapper.className = `todo-wrapper ${todo.completed ? 'completed' : ''}`;
   wrapper.dataset.id = todo.id;
 
-  // 紅色刪除背景
   const deleteBg = document.createElement('div');
   deleteBg.className = 'swipe-delete-bg';
   deleteBg.textContent = '放開刪除';
 
-  // 毛玻璃卡片本體
   const card = document.createElement('div');
   card.className = 'todo-card';
 
-  // 打勾圓圈
   const checkBtn = document.createElement('div');
   checkBtn.className = 'check-circle';
   checkBtn.onclick = () => updateDoc(doc(db, "users", currentUser.uid, "todos", todo.id), {
     completed: !todo.completed
   });
 
-  // 文字與標籤區
   const content = document.createElement('div');
   content.className = 'todo-content';
   
@@ -150,7 +231,6 @@ function createTodoElement(todo) {
     meta.appendChild(dueEl);
   }
 
-  // 一鍵匯入 Apple 行事曆 (.ics) 按鈕
   const calBtn = document.createElement('button');
   calBtn.className = 'cal-btn';
   calBtn.textContent = '📅 行事曆';
@@ -163,7 +243,6 @@ function createTodoElement(todo) {
   content.appendChild(textEl);
   content.appendChild(meta);
 
-  // 拖曳把手
   const handle = document.createElement('div');
   handle.className = 'drag-handle';
   handle.innerHTML = '≡';
@@ -174,20 +253,16 @@ function createTodoElement(todo) {
   wrapper.appendChild(deleteBg);
   wrapper.appendChild(card);
 
-  // 綁定左滑刪除手勢
   attachSwipeToDelete(card, todo.id);
-
   return wrapper;
 }
 
-// 6. 左滑刪除觸控邏輯
 function attachSwipeToDelete(cardEl, todoId) {
   let startX = 0;
   let currentX = 0;
   let isSwiping = false;
 
   cardEl.addEventListener('touchstart', (e) => {
-    // 若按在拖曳把手上則不觸發左滑
     if (e.target.classList.contains('drag-handle')) return;
     startX = e.touches[0].clientX;
     isSwiping = true;
@@ -197,7 +272,7 @@ function attachSwipeToDelete(cardEl, todoId) {
   cardEl.addEventListener('touchmove', (e) => {
     if (!isSwiping) return;
     const diffX = e.touches[0].clientX - startX;
-    if (diffX < 0) { // 只允許往左滑
+    if (diffX < 0) {
       currentX = diffX;
       cardEl.style.transform = `translateX(${currentX}px)`;
     }
@@ -208,7 +283,6 @@ function attachSwipeToDelete(cardEl, todoId) {
     isSwiping = false;
     cardEl.style.transition = 'transform 0.2s ease-out';
 
-    // 左滑超過 110px 觸發刪除
     if (currentX < -110) {
       cardEl.style.transform = 'translateX(-100%)';
       setTimeout(async () => {
@@ -221,7 +295,9 @@ function attachSwipeToDelete(cardEl, todoId) {
   });
 }
 
-// 7. 拖曳排序初始化與寫回 Firebase
+// ==========================================
+// 拖曳排序
+// ==========================================
 Sortable.create(todoListEl, {
   handle: '.drag-handle',
   animation: 180,
@@ -238,11 +314,12 @@ Sortable.create(todoListEl, {
   }
 });
 
-// 8. 生成 .ics 檔案喚起 iOS 原生行事曆
+// ==========================================
+// Apple 行事曆匯出 (.ics)
+// ==========================================
 function exportToAppleCalendar(todo) {
   const startDate = todo.dueDate ? new Date(todo.dueDate) : new Date(Date.now() + 3600000);
-  const endDate = new Date(startDate.getTime() + 3600000); // 預設時長 1 小時
-
+  const endDate = new Date(startDate.getTime() + 3600000);
   const formatICSDate = (date) => date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
   const icsContent = [
@@ -256,7 +333,7 @@ function exportToAppleCalendar(todo) {
     `DTEND:${formatICSDate(endDate)}`,
     `SUMMARY:[${todo.tag}] ${todo.text}`,
     'BEGIN:VALARM',
-    'TRIGGER:-PT15M', // 提前 15 分鐘提醒
+    'TRIGGER:-PT15M',
     'ACTION:DISPLAY',
     'DESCRIPTION:Reminder',
     'END:VALARM',
@@ -275,7 +352,9 @@ function exportToAppleCalendar(todo) {
   URL.revokeObjectURL(url);
 }
 
-// 9. iOS 系統通知授權與定時檢查
+// ==========================================
+// 系統通知
+// ==========================================
 notifyBtn.addEventListener('click', async () => {
   if (!('Notification' in window)) {
     alert('請先將此網頁「加入主畫面」後再開啟通知功能');
@@ -283,19 +362,17 @@ notifyBtn.addEventListener('click', async () => {
   }
   const permission = await Notification.requestPermission();
   if (permission === 'granted') {
-    notifyBtn.textContent = '🔔 通知已開啟';
+    notifyBtn.textContent = '🔔 已開啟';
     new Notification('通知已啟用', { body: '到期任務將會透過系統橫幅提醒你！' });
   }
 });
 
-// 每 30 秒檢查是否有到期任務需要發送通知
 setInterval(() => {
   if (Notification.permission !== 'granted') return;
   const now = Date.now();
   allTodos.forEach(todo => {
     if (!todo.completed && todo.dueDate && !notifiedIds.has(todo.id)) {
       const dueTime = new Date(todo.dueDate).getTime();
-      // 若已到達設定時間（誤差 1 分鐘內）
       if (now >= dueTime && now - dueTime < 60000) {
         new Notification(`⏰ [${todo.tag}] 任務提醒`, { body: todo.text });
         notifiedIds.add(todo.id);
@@ -304,7 +381,6 @@ setInterval(() => {
   });
 }, 30000);
 
-// 註冊 Service Worker
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
