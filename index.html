@@ -9,21 +9,24 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="style.css">
-  <!-- 引入 SortableJS 支援手機端流暢拖曳排序 -->
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
 
-  <!-- 背景光暈裝飾（凸顯毛玻璃效果） -->
-  <div class="bg-orb orb-1"></div>
-  <div class="bg-orb orb-2"></div>
+  <!-- 背景層（支援預設漸層或自訂相片） -->
+  <div id="custom-bg-layer"></div>
+  <div id="bg-dimmer"></div>
 
   <header id="app-header" class="glass-panel">
-    <div>
+    <div class="header-title-box">
       <h1>待辦清單</h1>
-      <span id="sync-status">連線中...</span>
+      <span id="sync-status">初始化中...</span>
     </div>
-    <button id="notify-btn" class="glass-btn" title="開啟提醒通知">🔔 開啟通知</button>
+    <div class="header-actions">
+      <button id="bg-btn" class="glass-btn" title="更換背景">🖼️ 背景</button>
+      <button id="notify-btn" class="glass-btn" title="開啟提醒通知">🔔 通知</button>
+      <input type="file" id="bg-file-input" accept="image/*" hidden>
+    </div>
   </header>
 
   <!-- 課堂標籤篩選列 -->
@@ -54,7 +57,7 @@
           <option value="程式理化">💻 程式理化</option>
           <option value="個人雜項">📌 個人雜項</option>
         </select>
-        <input type="datetime-local" id="due-date-input" class="glass-select">
+        <input type="datetime-local" id="due-date-input" class="glass-select" aria-label="設定到期時間">
       </div>
     </form>
   </footer>
