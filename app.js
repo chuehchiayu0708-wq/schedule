@@ -5,7 +5,7 @@ import {
   query, orderBy, onSnapshot, serverTimestamp 
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// 1. 已修正 apiKey 拼字並填入你的 Firebase 設定
+// 1. Firebase 設定
 const firebaseConfig = {
   apiKey: "AIzaSyDhYzayWMLzJdZGLwymhY3hfxCl6tw4qtE",
   authDomain: "schedule-bc89e.firebaseapp.com",
@@ -21,6 +21,7 @@ const db = getFirestore(app);
 
 // DOM 元素
 const statusEl = document.getElementById('sync-status');
+const filterBar = document.getElementById('filter-bar');
 const todoForm = document.getElementById('todo-form');
 const todoInput = document.getElementById('todo-input');
 const tagSelect = document.getElementById('tag-select');
@@ -37,7 +38,125 @@ let currentFilter = 'all';
 let notifiedIds = new Set();
 
 // ==========================================
-// 自訂背景邏輯（支援相簿選圖、自動壓縮與重置）
+// 課堂類別管理（預設 + 自訂類別本機保存）
+// ==========================================
+const DEFAULT_TAGS = [
+  { name: '外文文學', icon: '📖' },
+  { name: '設計空間', icon: '🏛️' },
+  { name: '程式理化', icon: '💻' },
+  { name: '個人雜項', icon: '📌' }
+];
+
+let customTags = JSON.parse(localStorage.getItem('pwa_custom_tags') || '[]');
+
+function getAllTags() {
+  return [...DEFAULT_TAGS, ...customTags];
+}
+
+// 根據類別名稱計算固定的顏色編號 (0~5)
+function getTagColorIndex(tagName) {
+  const all = getAllTags();
+  const idx = all.findIndex(t => t.name === tagName);
+  if (idx !== -1) return idx % 6;
+  let hash = 0;
+  for (let i = 0; i < tagName.length; i++) {
+    hash = tagName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % 6;
+}
+
+function renderCategories() {
+  const allTags = getAllTags();
+
+  // 1. 渲染頂部篩選列
+  filterBar.innerHTML = '';
+
+  const allBtn = document.createElement('button');
+  allBtn.className = `filter-chip ${currentFilter === 'all' ? 'active' : ''}`;
+  allBtn.textContent = '全部';
+  allBtn.onclick = () => {
+    currentFilter = 'all';
+    renderCategories();
+    renderList();
+  };
+  filterBar.appendChild(allBtn);
+
+  allTags.forEach((tagObj, index) => {
+    const chip = document.createElement('button');
+    chip.className = `filter-chip ${currentFilter === tagObj.name ? 'active' : ''}`;
+    chip.textContent = tagObj.name;
+
+    chip.onclick = () => {
+      currentFilter = tagObj.name;
+      renderCategories();
+      renderList();
+    };
+
+    // 若為使用者自訂類別，支援長按刪除
+    const isCustom = index >= DEFAULT_TAGS.length;
+    if (isCustom) {
+      let pressTimer;
+      chip.addEventListener('touchstart', () => {
+        pressTimer = setTimeout(() => {
+          if (confirm(`確定要刪除「${tagObj.name}」這個自訂類別嗎？`)) {
+            customTags = customTags.filter(t => t.name !== tagObj.name);
+            localStorage.setItem('pwa_custom_tags', JSON.stringify(customTags));
+            if (currentFilter === tagObj.name) currentFilter = 'all';
+            renderCategories();
+            renderList();
+          }
+        }, 600);
+      }, { passive: true });
+      chip.addEventListener('touchend', () => clearTimeout(pressTimer));
+      chip.addEventListener('touchmove', () => clearTimeout(pressTimer));
+    }
+
+    filterBar.appendChild(chip);
+  });
+
+  // 「＋ 類別」按鈕
+  const addTagBtn = document.createElement('button');
+  addTagBtn.className = 'add-tag-chip';
+  addTagBtn.textContent = '＋ 類別';
+  addTagBtn.onclick = () => {
+    const rawName = prompt('請輸入新的課堂或分類名稱：');
+    if (!rawName) return;
+    const name = rawName.trim();
+    if (!name) return;
+
+    if (getAllTags().some(t => t.name === name)) {
+      alert('這個類別已經存在囉！');
+      return;
+    }
+
+    customTags.push({ name, icon: '🏷️' });
+    localStorage.setItem('pwa_custom_tags', JSON.stringify(customTags));
+    currentFilter = name;
+    renderCategories();
+    tagSelect.value = name; // 同步切換底部輸入框的預設分類
+    renderList();
+  };
+  filterBar.appendChild(addTagBtn);
+
+  // 2. 同步更新底部輸入框的下拉選單
+  const prevSelected = tagSelect.value;
+  tagSelect.innerHTML = '';
+  allTags.forEach(tagObj => {
+    const opt = document.createElement('option');
+    opt.value = tagObj.name;
+    opt.textContent = `${tagObj.icon} ${tagObj.name}`;
+    tagSelect.appendChild(opt);
+  });
+  if (allTags.some(t => t.name === prevSelected)) {
+    tagSelect.value = prevSelected;
+  }
+}
+
+// 初始化渲染類別
+renderCategories();
+
+// ==========================================
+// 自訂背景邏輯
 // ==========================================
 const savedBg = localStorage.getItem('pwa_custom_bg');
 if (savedBg && customBgLayer) {
@@ -104,7 +223,6 @@ if (bgBtn && bgFileInput) {
 statusEl.textContent = "正在驗證身分...";
 signInAnonymously(auth).catch((error) => {
   statusEl.textContent = `驗證失敗: ${error.code}`;
-  console.error("Auth Error:", error);
 });
 
 onAuthStateChanged(auth, (user) => {
@@ -128,12 +246,11 @@ function listenToTodos(uid) {
     renderList();
   }, (error) => {
     statusEl.textContent = `同步錯誤: ${error.code}`;
-    console.error("Firestore Error:", error);
   });
 }
 
 // ==========================================
-// 渲染清單與篩選
+// 渲染清單
 // ==========================================
 function renderList() {
   todoListEl.innerHTML = '';
@@ -145,15 +262,6 @@ function renderList() {
     todoListEl.appendChild(createTodoElement(todo));
   });
 }
-
-document.querySelectorAll('.filter-chip').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentFilter = btn.dataset.tag;
-    renderList();
-  });
-});
 
 // ==========================================
 // 新增待辦
@@ -220,7 +328,8 @@ function createTodoElement(todo) {
   meta.className = 'todo-meta';
 
   const tagBadge = document.createElement('span');
-  tagBadge.className = `tag-badge tag-${todo.tag}`;
+  const colorIdx = getTagColorIndex(todo.tag);
+  tagBadge.className = `tag-badge tag-color-${colorIdx}`;
   tagBadge.textContent = todo.tag;
   meta.appendChild(tagBadge);
 
