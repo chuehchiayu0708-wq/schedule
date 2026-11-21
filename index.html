@@ -13,37 +13,28 @@
 </head>
 <body>
 
-  <!-- 背景層（支援預設漸層或自訂相片） -->
   <div id="custom-bg-layer"></div>
   <div id="bg-dimmer"></div>
 
   <header id="app-header" class="glass-panel">
     <div class="header-title-box">
       <h1>待辦清單</h1>
-      <span id="sync-status">初始化中...</span>
+      <span id="sync-status">等待登入...</span>
     </div>
     <div class="header-actions">
+      <button id="auth-btn" class="glass-btn" title="Google 帳號登入">🔑 登入</button>
       <button id="bg-btn" class="glass-btn" title="更換背景">🖼️ 背景</button>
       <button id="notify-btn" class="glass-btn" title="開啟提醒通知">🔔 通知</button>
       <input type="file" id="bg-file-input" accept="image/*" hidden>
     </div>
   </header>
 
-  <!-- 課堂標籤篩選列 -->
-  <nav id="filter-bar">
-    <button class="filter-chip active" data-tag="all">全部</button>
-    <button class="filter-chip" data-tag="外文文學">外文文學</button>
-    <button class="filter-chip" data-tag="設計空間">設計空間</button>
-    <button class="filter-chip" data-tag="程式理化">程式理化</button>
-    <button class="filter-chip" data-tag="個人雜項">個人雜項</button>
-  </nav>
+  <nav id="filter-bar"></nav>
 
-  <!-- 待辦清單容器 -->
   <main id="todo-list-container">
     <ul id="todo-list"></ul>
   </main>
 
-  <!-- 底部懸浮輸入框 -->
   <footer id="floating-input-wrapper" class="glass-panel">
     <form id="todo-form">
       <div class="input-top-row">
@@ -51,12 +42,7 @@
         <button type="submit" id="add-btn">＋</button>
       </div>
       <div class="input-meta-row">
-        <select id="tag-select" class="glass-select">
-          <option value="外文文學">📖 外文文學</option>
-          <option value="設計空間">🏛️ 設計空間</option>
-          <option value="程式理化">💻 程式理化</option>
-          <option value="個人雜項">📌 個人雜項</option>
-        </select>
+        <select id="tag-select" class="glass-select"></select>
         <input type="datetime-local" id="due-date-input" class="glass-select" aria-label="設定到期時間">
       </div>
     </form>

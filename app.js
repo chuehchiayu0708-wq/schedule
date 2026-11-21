@@ -1,5 +1,8 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { 
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
+  onAuthStateChanged, signOut 
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { 
   getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, writeBatch,
   query, orderBy, onSnapshot, serverTimestamp 
@@ -17,10 +20,12 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
 const db = getFirestore(app);
 
 // DOM 元素
 const statusEl = document.getElementById('sync-status');
+const authBtn = document.getElementById('auth-btn');
 const filterBar = document.getElementById('filter-bar');
 const todoForm = document.getElementById('todo-form');
 const todoInput = document.getElementById('todo-input');
@@ -33,12 +38,75 @@ const bgFileInput = document.getElementById('bg-file-input');
 const customBgLayer = document.getElementById('custom-bg-layer');
 
 let currentUser = null;
+let unsubscribeTodos = null;
 let allTodos = [];
 let currentFilter = 'all';
 let notifiedIds = new Set();
 
 // ==========================================
-// 課堂類別管理（預設 + 自訂類別本機保存）
+// Google 帳號登入 / 登出邏輯
+// ==========================================
+// 處理 iOS 跳轉登入返回後的結果
+getRedirectResult(auth).catch((error) => {
+  statusEl.textContent = `登入失敗: ${error.code}`;
+});
+
+authBtn.addEventListener('click', async () => {
+  if (currentUser) {
+    if (confirm(`目前已登入 (${currentUser.email})，要登出嗎？`)) {
+      await signOut(auth);
+    }
+    return;
+  }
+
+  statusEl.textContent = "開啟 Google 登入中...";
+  try {
+    // 優先使用彈窗登入；若在 iOS 主畫面獨立模式被阻擋則自動切換為跳轉登入
+    await signInWithPopup(auth, provider);
+  } catch (error) {
+    if (error.code === 'auth/popup-blocked' || error.code === 'auth/operation-not-supported-in-this-environment') {
+      await signInWithRedirect(auth, provider);
+    } else {
+      statusEl.textContent = `登入錯誤: ${error.code}`;
+    }
+  }
+});
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    currentUser = user;
+    authBtn.textContent = '👤 已登入';
+    statusEl.textContent = `連線中 (${user.displayName || user.email})...`;
+    listenToTodos(user.uid);
+  } else {
+    currentUser = null;
+    if (unsubscribeTodos) unsubscribeTodos();
+    allTodos = [];
+    renderList();
+    authBtn.textContent = '🔑 登入';
+    statusEl.textContent = "請點右上角登入 Google 同步資料";
+  }
+});
+
+function listenToTodos(uid) {
+  if (unsubscribeTodos) unsubscribeTodos();
+  const todosRef = collection(db, "users", uid, "todos");
+  const q = query(todosRef, orderBy("order", "asc"));
+
+  unsubscribeTodos = onSnapshot(q, (snapshot) => {
+    statusEl.textContent = `已同步 (${currentUser.displayName || 'Google 帳號'})`;
+    allTodos = [];
+    snapshot.forEach((docSnap) => {
+      allTodos.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    renderList();
+  }, (error) => {
+    statusEl.textContent = `同步錯誤: ${error.code}`;
+  });
+}
+
+// ==========================================
+// 課堂類別管理
 // ==========================================
 const DEFAULT_TAGS = [
   { name: '外文文學', icon: '📖' },
@@ -53,7 +121,6 @@ function getAllTags() {
   return [...DEFAULT_TAGS, ...customTags];
 }
 
-// 根據類別名稱計算固定的顏色編號 (0~5)
 function getTagColorIndex(tagName) {
   const all = getAllTags();
   const idx = all.findIndex(t => t.name === tagName);
@@ -67,8 +134,6 @@ function getTagColorIndex(tagName) {
 
 function renderCategories() {
   const allTags = getAllTags();
-
-  // 1. 渲染頂部篩選列
   filterBar.innerHTML = '';
 
   const allBtn = document.createElement('button');
@@ -92,7 +157,6 @@ function renderCategories() {
       renderList();
     };
 
-    // 若為使用者自訂類別，支援長按刪除
     const isCustom = index >= DEFAULT_TAGS.length;
     if (isCustom) {
       let pressTimer;
@@ -114,7 +178,6 @@ function renderCategories() {
     filterBar.appendChild(chip);
   });
 
-  // 「＋ 類別」按鈕
   const addTagBtn = document.createElement('button');
   addTagBtn.className = 'add-tag-chip';
   addTagBtn.textContent = '＋ 類別';
@@ -133,12 +196,11 @@ function renderCategories() {
     localStorage.setItem('pwa_custom_tags', JSON.stringify(customTags));
     currentFilter = name;
     renderCategories();
-    tagSelect.value = name; // 同步切換底部輸入框的預設分類
+    tagSelect.value = name;
     renderList();
   };
   filterBar.appendChild(addTagBtn);
 
-  // 2. 同步更新底部輸入框的下拉選單
   const prevSelected = tagSelect.value;
   tagSelect.innerHTML = '';
   allTags.forEach(tagObj => {
@@ -152,7 +214,6 @@ function renderCategories() {
   }
 }
 
-// 初始化渲染類別
 renderCategories();
 
 // ==========================================
@@ -218,39 +279,7 @@ if (bgBtn && bgFileInput) {
 }
 
 // ==========================================
-// Firebase 驗證與資料監聽
-// ==========================================
-statusEl.textContent = "正在驗證身分...";
-signInAnonymously(auth).catch((error) => {
-  statusEl.textContent = `驗證失敗: ${error.code}`;
-});
-
-onAuthStateChanged(auth, (user) => {
-  if (user) {
-    currentUser = user;
-    statusEl.textContent = "連線資料庫中...";
-    listenToTodos(user.uid);
-  }
-});
-
-function listenToTodos(uid) {
-  const todosRef = collection(db, "users", uid, "todos");
-  const q = query(todosRef, orderBy("order", "asc"));
-
-  onSnapshot(q, (snapshot) => {
-    statusEl.textContent = "已連線並即時同步";
-    allTodos = [];
-    snapshot.forEach((docSnap) => {
-      allTodos.push({ id: docSnap.id, ...docSnap.data() });
-    });
-    renderList();
-  }, (error) => {
-    statusEl.textContent = `同步錯誤: ${error.code}`;
-  });
-}
-
-// ==========================================
-// 渲染清單
+// 渲染清單與新增待辦
 // ==========================================
 function renderList() {
   todoListEl.innerHTML = '';
@@ -263,15 +292,12 @@ function renderList() {
   });
 }
 
-// ==========================================
-// 新增待辦
-// ==========================================
 todoForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = todoInput.value.trim();
   if (!text) return;
   if (!currentUser) {
-    alert("尚未連線完成，請稍候再試");
+    alert("請先點擊右上角「🔑 登入」Google 帳號後再新增！");
     return;
   }
 
